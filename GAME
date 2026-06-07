@@ -1,0 +1,227 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const W = 600, H = 400;
+const PADDLE_W = 60, PADDLE_H = 14;
+const BALL_R = 12;
+const SPEED_INC = 0.15;
+
+function drawPizza(ctx, x, y, w, h) {
+  // Pizza shape (ellipse)
+  ctx.save();
+  ctx.translate(x, y);
+  // crust
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w/2, h/2, 0, 0, Math.PI*2);
+  ctx.fillStyle = "#d4790a";
+  ctx.fill();
+  // sauce
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w/2-4, h/2-3, 0, 0, Math.PI*2);
+  ctx.fillStyle = "#c0392b";
+  ctx.fill();
+  // cheese
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w/2-8, h/2-6, 0, 0, Math.PI*2);
+  ctx.fillStyle = "#f5d76e";
+  ctx.fill();
+  // pepperoni
+  const pepps = [[-8,0],[8,0],[0,-4]];
+  pepps.forEach(([px,py])=>{
+    ctx.beginPath();
+    ctx.ellipse(px, py, 4, 3, 0, 0, Math.PI*2);
+    ctx.fillStyle = "#922b21";
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawBall(ctx, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.font = `${BALL_R*2.2}px serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("🍆", 0, 0);
+  ctx.restore();
+}
+
+export default function PizzaPong() {
+  const canvasRef = useRef();
+  const stateRef = useRef({
+    ball: { x: W/2, y: H/2, vx: 3.5, vy: 2.5 },
+    p1: W/2, p2: W/2,
+    score: { p1: 0, p2: 0 },
+    running: false,
+    keys: {},
+  });
+  const animRef = useRef();
+  const [score, setScore] = useState({p1:0,p2:0});
+  const [running, setRunning] = useState(false);
+  const [winner, setWinner] = useState(null);
+
+  const resetBall = useCallback((dir=1) => {
+    const s = stateRef.current;
+    s.ball = { x:W/2, y:H/2, vx: (3.5 + Math.random()*0.5)*dir, vy: (Math.random()>0.5?1:-1)*(2+Math.random()) };
+  },[]);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if(!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const s = stateRef.current;
+
+    // bg
+    ctx.fillStyle = "#1a0a2e";
+    ctx.fillRect(0,0,W,H);
+
+    // center line
+    ctx.setLineDash([10,10]);
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // paddles (pizza)
+    drawPizza(ctx, s.p1, H-30, PADDLE_W, PADDLE_H);
+    drawPizza(ctx, s.p2, 30, PADDLE_W, PADDLE_H);
+
+    // ball
+    drawBall(ctx, s.ball.x, s.ball.y);
+
+    // score
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.font = "bold 28px -apple-system";
+    ctx.textAlign = "center";
+    ctx.fillText(s.score.p2, W/2-60, 50);
+    ctx.fillText(s.score.p1, W/2+60, H-15);
+
+    // labels
+    ctx.font = "12px -apple-system";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText("P2 ← →", W/4, H-8);
+    ctx.fillText("P1 A D", 3*W/4, H-8);
+  },[]);
+
+  const gameLoop = useCallback(() => {
+    const s = stateRef.current;
+    if(!s.running) return;
+
+    const keys = s.keys;
+    const speed = 7;
+
+    // move paddles
+    if(keys["ArrowLeft"]) s.p1 = Math.max(PADDLE_W/2, s.p1-speed);
+    if(keys["ArrowRight"]) s.p1 = Math.min(W-PADDLE_W/2, s.p1+speed);
+    if(keys["a"]||keys["A"]) s.p2 = Math.max(PADDLE_W/2, s.p2-speed);
+    if(keys["d"]||keys["D"]) s.p2 = Math.min(W-PADDLE_W/2, s.p2+speed);
+
+    // move ball
+    s.ball.x += s.ball.vx;
+    s.ball.y += s.ball.vy;
+
+    // wall bounce
+    if(s.ball.x-BALL_R < 0) { s.ball.x = BALL_R; s.ball.vx *= -1; }
+    if(s.ball.x+BALL_R > W) { s.ball.x = W-BALL_R; s.ball.vx *= -1; }
+
+    // paddle 1 (bottom)
+    const p1y = H-30;
+    if(s.ball.vy > 0 && s.ball.y+BALL_R >= p1y-PADDLE_H/2 && s.ball.y+BALL_R <= p1y+PADDLE_H/2
+      && s.ball.x >= s.p1-PADDLE_W/2-BALL_R && s.ball.x <= s.p1+PADDLE_W/2+BALL_R) {
+      s.ball.vy *= -(1+SPEED_INC);
+      s.ball.vx += (s.ball.x - s.p1) * 0.08;
+      s.ball.y = p1y - PADDLE_H/2 - BALL_R;
+    }
+
+    // paddle 2 (top)
+    const p2y = 30;
+    if(s.ball.vy < 0 && s.ball.y-BALL_R <= p2y+PADDLE_H/2 && s.ball.y-BALL_R >= p2y-PADDLE_H/2
+      && s.ball.x >= s.p2-PADDLE_W/2-BALL_R && s.ball.x <= s.p2+PADDLE_W/2+BALL_R) {
+      s.ball.vy *= -(1+SPEED_INC);
+      s.ball.vx += (s.ball.x - s.p2) * 0.08;
+      s.ball.y = p2y + PADDLE_H/2 + BALL_R;
+    }
+
+    // score
+    if(s.ball.y > H+20) {
+      s.score.p2++;
+      setScore({...s.score});
+      if(s.score.p2 >= 5) { s.running=false; setRunning(false); setWinner("P2 🍕"); return; }
+      resetBall(-1);
+    }
+    if(s.ball.y < -20) {
+      s.score.p1++;
+      setScore({...s.score});
+      if(s.score.p1 >= 5) { s.running=false; setRunning(false); setWinner("P1 🍕"); return; }
+      resetBall(1);
+    }
+
+    // clamp speed
+    const spd = Math.sqrt(s.ball.vx**2+s.ball.vy**2);
+    if(spd > 14) { s.ball.vx = s.ball.vx/spd*14; s.ball.vy = s.ball.vy/spd*14; }
+
+    draw();
+    animRef.current = requestAnimationFrame(gameLoop);
+  },[draw, resetBall]);
+
+  useEffect(()=>{
+    draw();
+    const onKey = e => { stateRef.current.keys[e.key] = e.type==="keydown"; };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    return ()=>{ window.removeEventListener("keydown",onKey); window.removeEventListener("keyup",onKey); cancelAnimationFrame(animRef.current); };
+  },[draw]);
+
+  function startGame(){
+    const s = stateRef.current;
+    s.score = {p1:0,p2:0};
+    s.p1 = W/2; s.p2 = W/2;
+    s.running = true;
+    setScore({p1:0,p2:0});
+    setWinner(null);
+    setRunning(true);
+    resetBall(1);
+    cancelAnimationFrame(animRef.current);
+    animRef.current = requestAnimationFrame(gameLoop);
+  }
+
+  // touch controls
+  const touchStart = useRef({});
+  function handleTouchMove(e, player){
+    e.preventDefault();
+    const t = e.touches[0];
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (t.clientX - rect.left) * (W / rect.width);
+    if(player===1) stateRef.current.p1 = Math.max(PADDLE_W/2, Math.min(W-PADDLE_W/2, x));
+    else stateRef.current.p2 = Math.max(PADDLE_W/2, Math.min(W-PADDLE_W/2, x));
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"20px 0",background:"transparent"}}>
+      <div style={{fontSize:22,fontWeight:700,marginBottom:12,color:"#f5d76e",letterSpacing:1}}>🍕 Pizza Pong 🍆</div>
+
+      <div style={{position:"relative"}}>
+        <canvas ref={canvasRef} width={W} height={H} style={{borderRadius:16,border:"2px solid rgba(255,255,255,0.1)",maxWidth:"100%",touchAction:"none"}}
+          onTouchMove={e=>{ const rect=e.currentTarget.getBoundingClientRect(); const x=(e.touches[0].clientX-rect.left)*(W/rect.width); const y=(e.touches[0].clientY-rect.top)*(H/rect.height); if(y>H*0.6) stateRef.current.p1=Math.max(PADDLE_W/2,Math.min(W-PADDLE_W/2,x)); else stateRef.current.p2=Math.max(PADDLE_W/2,Math.min(W-PADDLE_W/2,x)); }}
+        />
+        {(!running||winner) && (
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.7)",borderRadius:16}}>
+            {winner && <div style={{fontSize:28,fontWeight:800,color:"#f5d76e",marginBottom:8}}>Vince {winner}! 🎉</div>}
+            <div style={{color:"rgba(255,255,255,0.6)",fontSize:14,marginBottom:20,textAlign:"center",padding:"0 20px"}}>
+              {winner ? "Rivincita?" : "P1: ← → | P2: A D\nSu mobile: tocca lo schermo"}
+            </div>
+            <button onClick={startGame} style={{background:"#f5d76e",border:"none",borderRadius:14,color:"#000",padding:"12px 32px",fontSize:17,fontWeight:700,cursor:"pointer"}}>
+              {winner ? "🍕 Rivincita!" : "🍕 Inizia!"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:40,marginTop:14,color:"rgba(255,255,255,0.5)",fontSize:13}}>
+        <span>P2 (top): <strong style={{color:"#fff"}}>A / D</strong></span>
+        <span>P1 (bottom): <strong style={{color:"#fff"}}>← / →</strong></span>
+      </div>
+      <div style={{color:"rgba(255,255,255,0.35)",fontSize:12,marginTop:4}}>Su mobile: tocca e trascina</div>
+    </div>
+  );
+}
