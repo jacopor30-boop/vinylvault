@@ -16,7 +16,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;co
 input,select,button{font-family:inherit;}
 input::placeholder{color:rgba(255,255,255,0.3);}
 ::-webkit-scrollbar{display:none;}
-.bg{position:fixed;inset:0;z-index:0;background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800');background-size:cover;background-position:center;filter:blur(18px) brightness(0.35);transform:scale(1.08);}
+.bg{position:fixed;inset:0;z-index:0;background-image:url('vino-e-vinili-rome.jpg');background-size:cover;background-position:center;filter:blur(18px) brightness(0.35);transform:scale(1.08);}
 .wrap{position:relative;z-index:1;min-height:100vh;padding-bottom:90px;padding-top:env(safe-area-inset-top,0px);}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
