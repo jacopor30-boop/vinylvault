@@ -1,1 +1,408 @@
-# vinylvault
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Vino e Vinili"/>
+<title>Vino e Vinili</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;color:#fff;overscroll-behavior:none;min-height:100vh;}
+input,select,button{font-family:inherit;}
+input::placeholder{color:rgba(255,255,255,0.3);}
+::-webkit-scrollbar{display:none;}
+.bg{position:fixed;inset:0;z-index:0;background-image:url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800');background-size:cover;background-position:center;filter:blur(18px) brightness(0.35);transform:scale(1.08);}
+.wrap{position:relative;z-index:1;min-height:100vh;padding-bottom:90px;padding-top:env(safe-area-inset-top,0px);}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="bg" id="bgEl"></div>
+<div class="wrap" id="root"></div>
+
+<script type="text/babel">
+const {useState,useRef,useEffect}=React;
+
+const CONDITIONS=["M","NM","VG+","VG","G+","G"];
+const CC={M:"#30d158",NM:"#30d158","VG+":"#ffd60a",VG:"#ff9f0a","G+":"#ff453a",G:"#ff453a"};
+const glass={background:"rgba(255,255,255,0.1)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",border:"0.5px solid rgba(255,255,255,0.2)"};
+
+const MOCK=[
+  {id:1,artist:"Pink Floyd",title:"The Dark Side of the Moon",year:1973,label:"Harvest",genre:"Rock",condition:"NM",value:85,pressings:"UK First Press",coverUrl:"https://upload.wikimedia.org/wikipedia/en/3/3b/Dark_Side_of_the_Moon.png"},
+  {id:2,artist:"Miles Davis",title:"Kind of Blue",year:1959,label:"Columbia",genre:"Jazz",condition:"VG+",value:120,pressings:"US Original",coverUrl:"https://upload.wikimedia.org/wikipedia/en/9/9c/MilesDavisKindofBlue.jpg"},
+  {id:3,artist:"The Beatles",title:"Abbey Road",year:1969,label:"Apple Records",genre:"Rock",condition:"VG",value:65,pressings:"UK Press",coverUrl:"https://upload.wikimedia.org/wikipedia/en/4/42/Beatles_-_Abbey_Road.jpg"},
+];
+
+function updateBg(url){
+  if(url){document.getElementById("bgEl").style.backgroundImage=`url('${url}')`;}
+  else{document.getElementById("bgEl").style.backgroundImage="url('https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800')";}
+}
+
+function Spinner(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10,padding:"28px 0"}}>
+      <div style={{width:32,height:32,border:"3px solid rgba(255,255,255,0.2)",borderTop:"3px solid #fff",borderRadius:"50%",animation:"spin 0.75s linear infinite"}}/>
+      <span style={{color:"rgba(255,255,255,0.6)",fontSize:13}}>Identificazione in corso…</span>
+    </div>
+  );
+}
+
+function CoverPlaceholder({artist,title}){
+  const i=(artist[0]||"")+(title[0]||"");
+  return(
+    <div style={{width:"100%",height:"100%",...glass,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(255,255,255,0.3)",fontSize:22,fontWeight:700,letterSpacing:2}}>
+      {i.toUpperCase()}
+    </div>
+  );
+}
+
+function discogsUrl(artist,title,year){
+  const q=encodeURIComponent(`${artist} ${title} ${year||""}`);
+  return`https://www.discogs.com/search/?q=${q}&type=release`;
+}
+
+function App(){
+  const [collection,setCollection]=useState(MOCK);
+  const [tab,setTab]=useState("library");
+  const [selected,setSelected]=useState(null);
+  const [addStep,setAddStep]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [identified,setIdentified]=useState(null);
+  const [form,setForm]=useState({artist:"",title:"",year:"",label:"",genre:"",condition:"VG+",pressings:"",value:""});
+  const [imgPreview,setImgPreview]=useState(null);
+  const [imgB64,setImgB64]=useState(null);
+  const [error,setError]=useState("");
+  const fileRef=useRef();
+
+  useEffect(()=>{
+    if(selected?.coverUrl) updateBg(selected.coverUrl);
+    else updateBg(null);
+  },[selected]);
+
+  const totalValue=collection.reduce((s,v)=>s+v.value,0);
+  const genres=[...new Set(collection.map(v=>v.genre))];
+
+  function openFile(e){
+    const f=e.target.files[0];if(!f)return;
+    const url=URL.createObjectURL(f);
+    setImgPreview(url);
+    const r=new FileReader();
+    r.onload=ev=>setImgB64(ev.target.result.split(",")[1]);
+    r.readAsDataURL(f);
+  }
+
+  async function identify(){
+    if(!imgB64)return;
+    setLoading(true);setError("");
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},
+          {type:"text",text:`Sei un esperto di dischi in vinile. Analizza questa immagine e identifica il disco.
+Restituisci SOLO un oggetto JSON senza backtick markdown, con questi campi:
+{
+  "artist": "nome artista",
+  "title": "titolo album",
+  "year": anno come numero intero,
+  "label": "etichetta discografica",
+  "genre": "genere musicale principale",
+  "pressings": "dettagli pressatura es. UK First Press, US Original, ecc.",
+  "condition": "stima visiva della condizione: M/NM/VG+/VG/G+/G",
+  "estimatedValue": valore medio di mercato in euro come numero intero basato su Discogs,
+  "valueMin": valore minimo in euro,
+  "valueMax": valore massimo in euro,
+  "confidence": "alta/media/bassa",
+  "notes": "note aggiuntive sul disco o sulla pressatura"
+}
+Se non identificabile restituisci: {"error": "Non riesco a identificare il vinile"}`}
+        ]}]})
+      });
+      const data=await res.json();
+      const text=data.content.map(b=>b.text||"").join("").replace(/```json|```/g,"").trim();
+      const p=JSON.parse(text);
+      if(p.error){setError(p.error);setAddStep("form");}
+      else{
+        setIdentified(p);
+        setForm({artist:p.artist||"",title:p.title||"",year:String(p.year||""),label:p.label||"",genre:p.genre||"",condition:p.condition||"VG+",pressings:p.pressings||"",value:String(p.estimatedValue||"")});
+        setAddStep("form");
+      }
+    }catch(e){setError("Errore durante l'analisi. Puoi inserire i dati manualmente.");setAddStep("form");}
+    setLoading(false);
+  }
+
+  function save(){
+    if(!form.artist||!form.title){setError("Artista e titolo obbligatori.");return;}
+    setCollection(c=>[...c,{id:Date.now(),...form,year:parseInt(form.year)||0,value:parseFloat(form.value)||0,coverUrl:imgPreview||"",valueMin:identified?.valueMin,valueMax:identified?.valueMax,notes:identified?.notes}]);
+    resetAll();setTab("library");
+  }
+
+  function resetAll(){setAddStep(null);setIdentified(null);setImgPreview(null);setImgB64(null);setError("");setForm({artist:"",title:"",year:"",label:"",genre:"",condition:"VG+",pressings:"",value:""});}
+
+  const inp={...glass,border:"none",borderRadius:12,color:"#fff",padding:"12px 14px",fontSize:16,width:"100%",outline:"none",WebkitAppearance:"none"};
+  const card={...glass,borderRadius:16,padding:"16px"};
+
+  // ── DETAIL ──
+  if(selected) return(
+    <div style={{minHeight:"100vh",color:"#fff",paddingBottom:40}}>
+      <div style={{position:"relative",height:320,overflow:"hidden"}}>
+        {selected.coverUrl
+          ?<img src={selected.coverUrl} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          :<CoverPlaceholder artist={selected.artist} title={selected.title}/>}
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,rgba(0,0,0,0.2) 0%,rgba(0,0,0,0.85) 100%)"}}/>
+        <button onClick={()=>setSelected(null)} style={{position:"absolute",top:"calc(env(safe-area-inset-top,0px) + 16px)",left:16,...glass,border:"none",borderRadius:50,color:"#fff",width:36,height:36,cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+        <div style={{position:"absolute",bottom:20,left:20,right:20}}>
+          <div style={{fontSize:24,fontWeight:700,lineHeight:1.2}}>{selected.title}</div>
+          <div style={{color:"rgba(255,255,255,0.65)",fontSize:16,marginTop:4}}>{selected.artist} · {selected.year}</div>
+        </div>
+      </div>
+      <div style={{padding:"0 16px 32px"}}>
+        {/* Value card */}
+        <div style={{...card,margin:"14px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{color:"rgba(255,255,255,0.45)",fontSize:12,marginBottom:4,textTransform:"uppercase",letterSpacing:0.8}}>Valore stimato (AI)</div>
+            <div style={{fontSize:36,fontWeight:700,color:"#ffd60a"}}>€ {selected.value}</div>
+            {selected.valueMin&&selected.valueMax&&(
+              <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginTop:2}}>range: € {selected.valueMin} – € {selected.valueMax}</div>
+            )}
+          </div>
+          <div style={{textAlign:"right",display:"flex",flexDirection:"column",gap:8,alignItems:"flex-end"}}>
+            <div style={{background:CC[selected.condition]+"33",border:`1px solid ${CC[selected.condition]}66`,borderRadius:10,padding:"6px 14px",color:CC[selected.condition],fontSize:14,fontWeight:700}}>{selected.condition}</div>
+            <a href={discogsUrl(selected.artist,selected.title,selected.year)} target="_blank" rel="noreferrer"
+              style={{background:"rgba(255,255,255,0.12)",border:"0.5px solid rgba(255,255,255,0.25)",borderRadius:10,padding:"6px 12px",color:"#fff",fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:5}}>
+              🔍 Discogs
+            </a>
+          </div>
+        </div>
+        {/* Info */}
+        <div style={{...card,overflow:"hidden",padding:0,marginBottom:12}}>
+          {[["Etichetta",selected.label],["Genere",selected.genre],["Pressatura",selected.pressings]].map(([k,v],i,a)=>(
+            <div key={k} style={{padding:"13px 16px",display:"flex",justifyContent:"space-between",borderBottom:i<a.length-1?"0.5px solid rgba(255,255,255,0.1)":"none"}}>
+              <span style={{color:"rgba(255,255,255,0.45)",fontSize:15}}>{k}</span>
+              <span style={{color:"#fff",fontSize:15,fontWeight:500,textAlign:"right",maxWidth:"60%"}}>{v||"—"}</span>
+            </div>
+          ))}
+        </div>
+        {selected.notes&&(
+          <div style={{...card,marginBottom:12}}>
+            <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:6,textTransform:"uppercase",letterSpacing:0.6}}>Note</div>
+            <div style={{color:"rgba(255,255,255,0.8)",fontSize:14,lineHeight:1.5}}>{selected.notes}</div>
+          </div>
+        )}
+        <button onClick={()=>{setCollection(c=>c.filter(v=>v.id!==selected.id));setSelected(null);}} style={{width:"100%",background:"rgba(255,69,58,0.15)",border:"0.5px solid rgba(255,69,58,0.4)",borderRadius:14,color:"#ff453a",fontSize:16,padding:"15px",cursor:"pointer",fontWeight:500}}>
+          Rimuovi dalla collezione
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── ADD ──
+  if(addStep) return(
+    <div style={{minHeight:"100vh",color:"#fff"}}>
+      <div style={{padding:"calc(env(safe-area-inset-top,0px) + 16px) 16px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <button onClick={resetAll} style={{background:"none",border:"none",color:"rgba(255,255,255,0.8)",fontSize:16,cursor:"pointer",padding:0}}>Annulla</button>
+        <span style={{fontSize:17,fontWeight:600}}>Nuovo vinile</span>
+        {addStep==="form"
+          ?<button onClick={save} style={{background:"none",border:"none",color:"#ffd60a",fontSize:16,fontWeight:600,cursor:"pointer",padding:0}}>Salva</button>
+          :<div style={{width:56}}/>}
+      </div>
+
+      {addStep==="scan"&&(
+        <div style={{padding:"24px 16px"}}>
+          {!imgPreview?(
+            <div>
+              <div style={{...card,padding:"48px 24px",textAlign:"center",marginBottom:14,borderRadius:20}}>
+                <div style={{fontSize:56,marginBottom:12,opacity:0.3}}>⬤</div>
+                <div style={{color:"rgba(255,255,255,0.5)",fontSize:15,marginBottom:8}}>Fotografa l'etichetta</div>
+                <div style={{color:"rgba(255,255,255,0.3)",fontSize:13,marginBottom:24}}>L'AI identificherà il disco e stimerà il valore</div>
+                <input type="file" accept="image/*" ref={fileRef} onChange={openFile} style={{display:"none"}}/>
+                <button onClick={()=>fileRef.current.click()} style={{background:"#ffd60a",border:"none",borderRadius:14,color:"#000",padding:"14px 28px",fontSize:16,fontWeight:700,cursor:"pointer",width:"100%"}}>
+                  📷  Carica foto
+                </button>
+              </div>
+              <button onClick={()=>setAddStep("form")} style={{...glass,border:"none",borderRadius:14,color:"rgba(255,255,255,0.6)",padding:"14px",fontSize:15,cursor:"pointer",width:"100%"}}>
+                Inserimento manuale
+              </button>
+            </div>
+          ):(
+            <div>
+              <img src={imgPreview} style={{width:"100%",borderRadius:16,marginBottom:16,maxHeight:260,objectFit:"cover"}}/>
+              {loading?<Spinner/>:(
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  <button onClick={identify} style={{background:"#ffd60a",border:"none",borderRadius:14,color:"#000",padding:"15px",fontSize:16,fontWeight:700,cursor:"pointer"}}>
+                    ✦ Identifica con AI
+                  </button>
+                  <button onClick={()=>{setImgPreview(null);setImgB64(null);}} style={{...glass,border:"none",borderRadius:14,color:"rgba(255,255,255,0.6)",padding:"14px",fontSize:15,cursor:"pointer"}}>
+                    Rimuovi foto
+                  </button>
+                </div>
+              )}
+              {error&&<div style={{color:"#ff453a",fontSize:13,textAlign:"center",marginTop:12,padding:"10px",background:"rgba(255,69,58,0.1)",borderRadius:10}}>{error}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {addStep==="form"&&(
+        <div style={{padding:"20px 16px 60px",overflowY:"auto"}}>
+          {identified&&!error&&(
+            <div style={{background:"rgba(255,214,10,0.1)",border:"0.5px solid rgba(255,214,10,0.4)",borderRadius:14,padding:"12px 16px",marginBottom:16}}>
+              <div style={{color:"#ffd60a",fontSize:13,fontWeight:600,marginBottom:4}}>✦ Identificato · confidenza {identified.confidence}</div>
+              <div style={{color:"rgba(255,255,255,0.6)",fontSize:13}}>{identified.artist} — {identified.title} ({identified.year})</div>
+              {identified.notes&&<div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginTop:4}}>{identified.notes}</div>}
+            </div>
+          )}
+          {error&&<div style={{background:"rgba(255,69,58,0.1)",border:"0.5px solid rgba(255,69,58,0.3)",borderRadius:14,padding:"12px 16px",marginBottom:14,color:"#ff453a",fontSize:14}}>{error}</div>}
+          {imgPreview&&<img src={imgPreview} style={{width:"100%",borderRadius:14,marginBottom:16,maxHeight:160,objectFit:"cover"}}/>}
+
+          {identified&&(
+            <div style={{...card,marginBottom:16,borderRadius:14}}>
+              <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:8,textTransform:"uppercase",letterSpacing:0.6}}>Valore stimato AI</div>
+              <div style={{fontSize:32,fontWeight:700,color:"#ffd60a",marginBottom:4}}>€ {identified.estimatedValue}</div>
+              {identified.valueMin&&identified.valueMax&&(
+                <div style={{color:"rgba(255,255,255,0.4)",fontSize:13}}>Range: € {identified.valueMin} – € {identified.valueMax}</div>
+              )}
+              <a href={discogsUrl(form.artist,form.title,form.year)} target="_blank" rel="noreferrer"
+                style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:10,...glass,border:"none",borderRadius:10,padding:"8px 14px",color:"rgba(255,255,255,0.8)",fontSize:13,textDecoration:"none"}}>
+                🔍 Verifica su Discogs
+              </a>
+            </div>
+          )}
+
+          {[["artist","Artista"],["title","Titolo"],["year","Anno"],["label","Etichetta"],["genre","Genere"],["pressings","Pressatura"]].map(([k,l])=>(
+            <div key={k} style={{marginBottom:12}}>
+              <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:4,textTransform:"uppercase",letterSpacing:0.6}}>{l}</div>
+              <input value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} style={inp} placeholder={l}/>
+            </div>
+          ))}
+
+          <div style={{marginBottom:12}}>
+            <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:6,textTransform:"uppercase",letterSpacing:0.6}}>Condizione</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {CONDITIONS.map(c=>(
+                <button key={c} onClick={()=>setForm(f=>({...f,condition:c}))} style={{background:form.condition===c?CC[c]+"33":"rgba(255,255,255,0.08)",border:`1px solid ${form.condition===c?CC[c]+"88":"transparent"}`,borderRadius:10,color:form.condition===c?CC[c]:"rgba(255,255,255,0.5)",padding:"8px 16px",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{marginBottom:24}}>
+            <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:4,textTransform:"uppercase",letterSpacing:0.6}}>Valore (€) — modificabile</div>
+            <input type="number" value={form.value} onChange={e=>setForm(f=>({...f,value:e.target.value}))} style={inp} placeholder="0"/>
+          </div>
+
+          <button onClick={save} style={{background:"#ffd60a",border:"none",borderRadius:14,color:"#000",padding:"15px",fontSize:16,fontWeight:700,cursor:"pointer",width:"100%"}}>
+            Salva nella collezione
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── MAIN ──
+  return(
+    <div style={{minHeight:"100vh",color:"#fff"}}>
+      <div style={{padding:"calc(env(safe-area-inset-top,0px) + 20px) 20px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:30,fontWeight:800,letterSpacing:-0.5}}>Vino e Vinili</div>
+          <div style={{color:"rgba(255,255,255,0.45)",fontSize:14,marginTop:2}}>{collection.length} dischi · € {totalValue.toLocaleString()}</div>
+        </div>
+        <button onClick={()=>setAddStep("scan")} style={{background:"#ffd60a",border:"none",borderRadius:50,color:"#000",width:38,height:38,fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>+</button>
+      </div>
+
+      <div style={{margin:"12px 16px 0",...glass,borderRadius:12,padding:3,display:"flex"}}>
+        {[["library","Collezione"],["stats","Statistiche"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{flex:1,background:tab===k?"rgba(255,255,255,0.18)":"transparent",border:"none",borderRadius:10,color:tab===k?"#fff":"rgba(255,255,255,0.4)",padding:"8px",fontSize:14,fontWeight:tab===k?600:400,cursor:"pointer"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab==="library"&&(
+        <div style={{padding:16}}>
+          {collection.length===0?(
+            <div style={{textAlign:"center",padding:"5rem 2rem",color:"rgba(255,255,255,0.2)"}}>
+              <div style={{fontSize:52,marginBottom:12}}>⬤</div>
+              <div style={{fontSize:17,fontWeight:500}}>Nessun vinile</div>
+              <div style={{fontSize:14,marginTop:6}}>Aggiungi il tuo primo disco</div>
+            </div>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {collection.map(v=>(
+                <div key={v.id} onClick={()=>setSelected(v)} style={{...glass,borderRadius:18,overflow:"hidden",cursor:"pointer"}}>
+                  <div style={{height:140,overflow:"hidden",position:"relative"}}>
+                    {v.coverUrl
+                      ?<img src={v.coverUrl} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>e.target.style.display="none"}/>
+                      :<CoverPlaceholder artist={v.artist} title={v.title}/>}
+                    <div style={{position:"absolute",top:8,right:8,background:CC[v.condition]+"44",border:`1px solid ${CC[v.condition]}66`,borderRadius:6,color:CC[v.condition],fontSize:10,fontWeight:700,padding:"2px 7px"}}>{v.condition}</div>
+                  </div>
+                  <div style={{padding:"10px 12px 12px"}}>
+                    <div style={{fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{v.title}</div>
+                    <div style={{color:"rgba(255,255,255,0.45)",fontSize:12,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{v.artist}</div>
+                    <div style={{color:"#ffd60a",fontSize:14,fontWeight:700,marginTop:6}}>€ {v.value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==="stats"&&(
+        <div style={{padding:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            {[["Dischi",collection.length],["Valore totale","€ "+totalValue.toLocaleString()],["Valore medio","€ "+(collection.length?Math.round(totalValue/collection.length):0)],["Genere top",genres.reduce((a,g)=>collection.filter(v=>v.genre===g).length>collection.filter(v=>v.genre===a).length?g:a,genres[0])||"—"]].map(([l,v])=>(
+              <div key={l} style={{...card,borderRadius:16}}>
+                <div style={{color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>{l}</div>
+                <div style={{fontSize:22,fontWeight:700}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{...card,borderRadius:18,marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:0.6,marginBottom:14}}>Per genere</div>
+            {genres.map(g=>{
+              const count=collection.filter(v=>v.genre===g).length;
+              return(
+                <div key={g} style={{marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:14,marginBottom:5}}>
+                    <span style={{fontWeight:500}}>{g}</span>
+                    <span style={{color:"rgba(255,255,255,0.4)"}}>{count}</span>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.1)",borderRadius:4,height:5}}>
+                    <div style={{background:"#ffd60a",width:`${Math.round((count/collection.length)*100)}%`,height:"100%",borderRadius:4}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{...card,borderRadius:18}}>
+            <div style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:0.6,marginBottom:14}}>Per condizione</div>
+            {CONDITIONS.filter(c=>collection.some(v=>v.condition===c)).map(c=>{
+              const count=collection.filter(v=>v.condition===c).length;
+              return(
+                <div key={c} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                  <span style={{background:CC[c]+"33",color:CC[c],fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:6,minWidth:36,textAlign:"center"}}>{c}</span>
+                  <div style={{flex:1,background:"rgba(255,255,255,0.1)",borderRadius:4,height:5}}>
+                    <div style={{background:CC[c],width:`${Math.round((count/collection.length)*100)}%`,height:"100%",borderRadius:4}}/>
+                  </div>
+                  <span style={{color:"rgba(255,255,255,0.35)",fontSize:13,minWidth:16}}>{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
